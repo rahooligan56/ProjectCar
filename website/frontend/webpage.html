@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Robot Control</title>
+
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #0f172a;
+      color: white;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      margin: 0;
+    }
+
+    .container {
+      width: 460px;
+      background: #020617;
+      padding: 35px;
+      border-radius: 14px;
+      box-shadow: 0 0 30px rgba(0,0,0,0.6);
+      text-align: center;
+    }
+
+    h2 {
+      margin-bottom: 8px;
+    }
+
+    p {
+      color: #94a3b8;
+      margin-bottom: 15px;
+    }
+
+    textarea {
+      width: 100%;
+      height: 70px;
+      resize: none;
+      padding: 12px;
+      font-size: 15px;
+      border-radius: 8px;
+      border: none;
+      outline: none;
+      margin-top: 10px;
+      background: #020617;
+      color: white;
+      border: 1px solid #334155;
+    }
+
+    .buttons {
+      display: flex;
+      gap: 12px;
+      margin-top: 15px;
+    }
+
+    button {
+      flex: 1;
+      font-size: 16px;
+      padding: 14px;
+      border: none;
+      border-radius: 10px;
+      color: white;
+      cursor: pointer;
+    }
+
+    #startBtn { background: #2563eb; }
+    #startBtn.listening { background: #dc2626; }
+    #stopBtn { background: #475569; }
+    #sendTextBtn { background: #16a34a; }
+
+    button:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    #output {
+      margin-top: 18px;
+      font-size: 16px;
+      min-height: 60px;
+      white-space: pre-line;
+      color: #e5e7eb;
+    }
+
+    .hint {
+      margin-top: 14px;
+      font-size: 13px;
+      color: #94a3b8;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <h2>🤖 Robot Control</h2>
+    <p>Speak a command or type one manually</p>
+
+    <!-- Manual Input -->
+    <textarea id="textInput" placeholder="Type a command (e.g. 'go forward')"></textarea>
+
+    <div class="buttons">
+      <button id="sendTextBtn">⌨️ SEND TEXT</button>
+    </div>
+
+    <hr style="margin:20px 0; border-color:#1e293b">
+
+    <!-- Voice Controls -->
+    <div class="buttons">
+      <button id="startBtn">🎙 START</button>
+      <button id="stopBtn" disabled>⏹ STOP</button>
+    </div>
+
+    <div id="output"></div>
+
+    <div class="hint">
+      Text and voice are processed locally by the LLM
+    </div>
+  </div>
+
+  <script>
+    const SpeechRecognition =
+      window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      alert("Speech recognition not supported in this browser.");
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = "en-US";
+    recognition.continuous = false;
+    recognition.interimResults = true;
+
+    const startBtn = document.getElementById("startBtn");
+    const stopBtn = document.getElementById("stopBtn");
+    const sendTextBtn = document.getElementById("sendTextBtn");
+    const textInput = document.getElementById("textInput");
+    const output = document.getElementById("output");
+
+    let listening = false;
+    let hasSpeech = false;
+
+    async function sendTranscript(transcript) {
+      const response = await fetch("http://127.0.0.1:5000/interpret", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ transcript })
+      });
+      return await response.json();
+    }
+
+    // ---------------- TEXT INPUT ----------------
+
+    sendTextBtn.addEventListener("click", async () => {
+      const text = textInput.value.trim();
+      if (!text) return;
+
+      output.textContent = " Interpreting…";
+
+      try {
+        const result = await sendTranscript(text);
+        output.textContent =
+          result.sent
+            ? ` Command sent: ${result.command}`
+            : ` Command: ${result.command} (not sent)`;
+      } catch (err) {
+        console.error(err);
+        output.textContent = " Backend error";
+      }
+    });
+
+    // ---------------- VOICE INPUT ----------------
+
+    startBtn.addEventListener("click", () => {
+      if (listening) return;
+
+      listening = true;
+      hasSpeech = false;
+
+      output.textContent = " Listening...";
+      startBtn.textContent = " Listening...";
+      startBtn.classList.add("listening");
+      stopBtn.disabled = false;
+
+      recognition.start();
+    });
+
+    stopBtn.addEventListener("click", () => {
+      if (!listening) return;
+      listening = false;
+      recognition.stop();
+    });
+
+    recognition.onresult = (event) => {
+      let transcript = "";
+      for (let i = 0; i < event.results.length; i++) {
+        transcript += event.results[i][0].transcript;
+      }
+
+      if (transcript.trim()) hasSpeech = true;
+      output.textContent = transcript;
+    };
+
+    recognition.onend = async () => {
+      listening = false;
+
+      startBtn.textContent = " START";
+      startBtn.classList.remove("listening");
+      stopBtn.disabled = true;
+
+      if (!hasSpeech) {
+        output.textContent = " No speech detected.";
+        return;
+      }
+
+      const transcript = output.textContent.trim();
+      output.textContent = " Interpreting…";
+
+      try {
+        const result = await sendTranscript(transcript);
+        output.textContent =
+          result.sent
+            ? ` Command sent: ${result.command}`
+            : ` Command: ${result.command} (not sent)`;
+      } catch (err) {
+        console.error(err);
+        output.textContent = " Backend error";
+      }
+    };
+
+    recognition.onerror = (event) => {
+      console.error("Speech error:", event.error);
+      listening = false;
+      output.textContent = " Speech error.";
+    };
+  </script>
+</body>
+</html>
