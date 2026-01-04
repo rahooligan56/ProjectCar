@@ -8,6 +8,15 @@
 #define BIN2 12  //Left Motor Backward
 #define PWMB 5   //Left Motor Speed
 
+
+// UltraSonic Sensor 1
+const uint8_t TRIG1 = 7;
+const uint8_t ECHO1 = 6;
+
+// UltraSonic Sensor 2
+const uint8_t TRIG2 = 13;
+const uint8_t ECHO2 = 10;
+
 String data = "";
 
 void FORWARD();
@@ -16,6 +25,38 @@ void TURN_RIGHT();
 void TURN_LEFT();
 void STOP();
 
+
+
+
+struct Ultrasonic {
+  uint8_t trig;
+  uint8_t echo;
+
+  enum State { IDLE,
+               TRIG_HIGH,
+               WAIT_ECHO_HIGH,
+               WAIT_ECHO_LOW } state;
+
+  unsigned long tStart;
+  unsigned long echoStart;
+  unsigned long duration;
+
+  float distanceCm;
+  bool ready;
+};
+Ultrasonic sensors[2] = {
+  { TRIG1, ECHO1, Ultrasonic::IDLE, 0, 0, 0, 0.0, false },
+  { TRIG2, ECHO2, Ultrasonic::IDLE, 0, 0, 0, 0.0, false }
+};
+
+int activeSensor = 0;
+
+const unsigned long TRIG_PULSE_US = 10;
+const unsigned long TIMEOUT_US = 38000;
+const unsigned long SENSOR_GAP_US = 60000;  // 60 ms
+unsigned long lastSwitch = 0;
+
+void updateUltrasonic(Ultrasonic &u);
 
 void setup() {
   //Motor Pins are output
@@ -27,20 +68,46 @@ void setup() {
   pinMode(PWMB, OUTPUT);
   Serial.begin(9600);
   Serial.println("test");
+
+  // Sets up 2 UltraSonic Sensors
+  for (int i = 0; i < 2; i++) {
+    pinMode(sensors[i].trig, OUTPUT);
+    pinMode(sensors[i].echo, INPUT);
+    digitalWrite(sensors[i].trig, LOW);
+  }
 }
 
 void loop() {
+  unsigned long now = micros();
+
+  if (sensors[activeSensor].state == Ultrasonic::IDLE && now - lastSwitch > SENSOR_GAP_US) {
+    activeSensor = (activeSensor + 1) % 2;
+    lastSwitch = now;
+  }
+
+  updateUltrasonic(sensors[activeSensor]);
+
+  for (int i = 0; i < 2; i++) {
+    if (sensors[i].ready) {
+      Serial.print("Sensor ");
+      Serial.print(i);
+      Serial.print(": ");
+      Serial.print(sensors[i].distanceCm);
+      Serial.println(" cm");
+      sensors[i].ready = false;
+    }
+  }
 
   while (Serial.available()) {
     char c = Serial.read();
 
-      if (c == '\n') {
-        data.trim();   // removes \r, spaces, hidden chars
+    if (c == '\n') {
+      data.trim();  // removes \r, spaces, hidden chars
 
       Serial.println(data);
       Serial.println(data.length());
       Serial.println("found the work");  // Print full string
-                             //OUR LOGIC HERE
+                                         //OUR LOGIC HERE
       if (data == "FORWARD") {
         FORWARD();
       } else if (data == "BACKWARD") {
@@ -117,4 +184,45 @@ void TURN_LEFT() {
   analogWrite(PWMA, speed);
 
   delay(1025);
+}
+
+void updateUltrasonic(Ultrasonic &u) {
+  unsigned long now = micros();
+
+  switch (u.state) {
+
+    case Ultrasonic::IDLE:
+      digitalWrite(u.trig, HIGH);
+      u.tStart = now;
+      u.state = Ultrasonic::TRIG_HIGH;
+      break;
+
+    case Ultrasonic::TRIG_HIGH:
+      if (now - u.tStart >= TRIG_PULSE_US) {
+        digitalWrite(u.trig, LOW);
+        u.tStart = now;
+        u.state = Ultrasonic::WAIT_ECHO_HIGH;
+      }
+      break;
+
+    case Ultrasonic::WAIT_ECHO_HIGH:
+      if (digitalRead(u.echo) == HIGH) {
+        u.echoStart = now;
+        u.state = Ultrasonic::WAIT_ECHO_LOW;
+      } else if (now - u.tStart > TIMEOUT_US) {
+        u.state = Ultrasonic::IDLE;
+      }
+      break;
+
+    case Ultrasonic::WAIT_ECHO_LOW:
+      if (digitalRead(u.echo) == LOW) {
+        u.duration = now - u.echoStart;
+        u.distanceCm = u.duration / 58.0;
+        u.ready = true;
+        u.state = Ultrasonic::IDLE;
+      } else if (now - u.echoStart > TIMEOUT_US) {
+        u.state = Ultrasonic::IDLE;
+      }
+      break;
+  }
 }
