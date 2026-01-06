@@ -45,8 +45,8 @@ struct Ultrasonic {
   bool ready;
 };
 Ultrasonic sensors[2] = {
-  { TRIG1, ECHO1, Ultrasonic::IDLE, 0, 0, 0, 0.0, false },
-  { TRIG2, ECHO2, Ultrasonic::IDLE, 0, 0, 0, 0.0, false }
+  { TRIG2, ECHO2, Ultrasonic::IDLE, 0, 0, 0, 0.0, false },
+  { TRIG1, ECHO1, Ultrasonic::IDLE, 0, 0, 0, 0.0, false }
 };
 
 int activeSensor = 0;
@@ -55,6 +55,8 @@ const unsigned long TRIG_PULSE_US = 10;
 const unsigned long TIMEOUT_US = 38000;
 const unsigned long SENSOR_GAP_US = 60000;  // 60 ms
 unsigned long lastSwitch = 0;
+unsigned long now = micros();
+unsigned long last = now - 1000000;
 
 void updateUltrasonic(Ultrasonic &u);
 
@@ -78,7 +80,9 @@ void setup() {
 }
 
 void loop() {
-  unsigned long now = micros();
+
+  now = micros();
+
 
   if (sensors[activeSensor].state == Ultrasonic::IDLE && now - lastSwitch > SENSOR_GAP_US) {
     activeSensor = (activeSensor + 1) % 2;
@@ -87,16 +91,21 @@ void loop() {
 
   updateUltrasonic(sensors[activeSensor]);
 
-  for (int i = 0; i < 2; i++) {
-    if (sensors[i].ready) {
-      Serial.print("Sensor ");
-      Serial.print(i);
-      Serial.print(": ");
-      Serial.print(sensors[i].distanceCm);
-      Serial.println(" cm");
-      sensors[i].ready = false;
-    }
+  if ((now - last) >= 1000000UL) {
+    last = now;
+
+    Serial.print("{");
+    Serial.print("\"us1\":");
+    Serial.print(sensors[0].distanceCm, 2);
+    Serial.print(",\"us2\":");
+    Serial.print(sensors[1].distanceCm, 2);
+    Serial.println("}");
+
+    sensors[0].ready = false;
+    sensors[1].ready = false;
   }
+
+
 
   while (Serial.available()) {
     char c = Serial.read();

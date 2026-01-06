@@ -13,6 +13,37 @@ const char* password = APPSK;
 
 ESP8266WebServer server(80);
 
+
+// Buffer for incoming JSON from Arduino
+char jsonBuf[128];
+uint8_t jsonLen = 0;
+bool jsonReady = false;
+
+// Store last valid JSON
+String lastJson = "{}";
+
+
+void readSerialJSON() {
+  while (Serial.available()) {
+    char c = Serial.read();
+
+    if (c == '\n') {
+      jsonBuf[jsonLen] = '\0';
+      lastJson = jsonBuf;   // store complete JSON line
+      jsonLen = 0;
+      jsonReady = true;
+    } else {
+      if (jsonLen < sizeof(jsonBuf) - 1) {
+        jsonBuf[jsonLen++] = c;
+      }
+    }
+  }
+}
+
+void handleUltrasonic() {
+  server.send(200, "application/json", lastJson);
+}
+
 void handleRoot() {
 
   if (server.hasArg("cmd")) {
@@ -41,11 +72,21 @@ void setup() {
     Serial.println(myIP);
 
     server.on("/", handleRoot);
+    server.on("/ultrasonic", handleUltrasonic);
 
     server.begin();
     Serial.println("HTTP server started");
 }
 
+unsigned long lastYield = 0;
+
 void loop() {
     server.handleClient();
-    delay(500); 
+    readSerialJSON();
+
+    if (millis() - lastYield > 10) { // every 10ms
+        yield();
+        lastYield = millis();
+    }
+}
+
